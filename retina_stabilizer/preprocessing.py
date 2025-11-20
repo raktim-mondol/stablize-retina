@@ -7,7 +7,7 @@ CLAHE fixes illumination drift across frames.
 
 import cv2
 import numpy as np
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Generator
 
 
 class Preprocessor:
@@ -72,6 +72,74 @@ class Preprocessor:
             frame_size = (width, height)
 
         return frames, fps, frame_size
+
+    def stream_video(self, video_path: str) -> Generator[Tuple[np.ndarray, int], None, Tuple[float, Tuple[int, int]]]:
+        """
+        Stream video frames one at a time (memory efficient).
+
+        Args:
+            video_path: Path to input video file
+
+        Yields:
+            Tuple of (frame, frame_index)
+
+        Returns:
+            Tuple of (fps, frame_size) after iteration completes
+        """
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Cannot open video: {video_path}")
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        if self.target_size is not None:
+            frame_size = self.target_size
+        else:
+            frame_size = (width, height)
+
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if self.target_size is not None:
+                frame = cv2.resize(frame, self.target_size)
+            yield frame, frame_idx
+            frame_idx += 1
+
+        cap.release()
+
+    def get_video_info(self, video_path: str) -> Tuple[int, float, Tuple[int, int]]:
+        """
+        Get video information without loading frames.
+
+        Args:
+            video_path: Path to input video file
+
+        Returns:
+            n_frames: Total number of frames
+            fps: Frames per second
+            frame_size: (width, height) of frames
+        """
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Cannot open video: {video_path}")
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        cap.release()
+
+        if self.target_size is not None:
+            frame_size = self.target_size
+        else:
+            frame_size = (width, height)
+
+        return n_frames, fps, frame_size
 
     def extract_green_channel(self, frame: np.ndarray) -> np.ndarray:
         """

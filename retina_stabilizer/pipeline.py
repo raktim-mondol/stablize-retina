@@ -12,7 +12,8 @@ Expected performance:
 
 import cv2
 import numpy as np
-from typing import List, Tuple, Optional, Dict, Any
+import torch
+from typing import List, Tuple, Optional, Dict, Any, Generator
 from tqdm import tqdm
 import time
 
@@ -58,7 +59,11 @@ class RetinaStabilizer:
         device: Optional[str] = None,
         use_vessel_segmentation: bool = True,
         vessel_model_path: Optional[str] = None,
-        verbose: bool = True
+        verbose: bool = True,
+        # Memory optimization
+        processing_scale: float = 1.0,
+        vessel_seg_size: Tuple[int, int] = (512, 512),
+        max_frames_in_memory: int = 50
     ):
         """
         Initialize the stabilization pipeline.
@@ -79,11 +84,23 @@ class RetinaStabilizer:
             use_vessel_segmentation: Whether to use neural vessel segmentation
             vessel_model_path: Path to vessel segmentation model
             verbose: Whether to print progress
+            processing_scale: Scale factor for motion estimation (0.25 = 1/4 resolution)
+            vessel_seg_size: Target size for vessel segmentation (width, height)
+            max_frames_in_memory: Maximum frames to keep in memory at once
         """
         self.verbose = verbose
         self.auto_crop = auto_crop
         self.inpaint_borders = inpaint_borders
         self.use_vessel_segmentation = use_vessel_segmentation
+        self.processing_scale = processing_scale
+        self.vessel_seg_size = vessel_seg_size
+        self.max_frames_in_memory = max_frames_in_memory
+
+        # Determine device
+        if device is None:
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        else:
+            self.device = torch.device(device)
 
         # Initialize modules
         self.preprocessor = Preprocessor(
@@ -126,6 +143,52 @@ class RetinaStabilizer:
         if self.verbose:
             print(message)
 
+    def _clear_gpu_memory(self):
+        """Clear GPU memory cache."""
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    def _downsample_frame(self, frame: np.ndarray, scale: float) -> np.ndarray:
+        """Downsample frame by scale factor."""
+        if scale >= 1.0:
+            return frame
+        h, w = frame.shape[:2]
+        new_h, new_w = int(h * scale), int(w * scale)
+        return cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+    def _upsample_frame(self, frame: np.ndarray, target_size: Tuple[int, int]) -> np.ndarray:
+        """Upsample frame to target size."""
+        return cv2.resize(frame, target_size, interpolation=cv2.INTER_LINEAR)
+
+    def _scale_transform(self, transform: Transform, scale: float) -> Transform:
+        """Scale transform from downsampled to full resolution."""
+        if scale >= 1.0:
+            return transform
+        # Scale translation values
+        return Transform(
+            tx=transform.tx / scale,
+            ty=transform.ty / scale,
+            angle=transform.angle,
+            scale=transform.scale
+        )
+
+    def _downsample_for_vessel_seg(self, frame: np.ndarray) -> Tuple[np.ndarray, Tuple[int, int]]:
+        """Downsample frame for vessel segmentation."""
+        original_size = frame.shape[:2]
+        target_h, target_w = self.vessel_seg_size[1], self.vessel_seg_size[0]
+
+        # Only downsample if larger than target
+        if original_size[0] > target_h or original_size[1] > target_w:
+            resized = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+            return resized, original_size
+        return frame, original_size
+
+    def _upsample_weights(self, weights: np.ndarray, target_size: Tuple[int, int]) -> np.ndarray:
+        """Upsample vessel weights to target size."""
+        if weights.shape[:2] == target_size:
+            return weights
+        return cv2.resize(weights, (target_size[1], target_size[0]), interpolation=cv2.INTER_LINEAR)
+
     def stabilize(
         self,
         video_path: str,
@@ -150,6 +213,12 @@ class RetinaStabilizer:
         n_frames = len(frames)
         self._log(f"  Loaded {n_frames} frames at {fps:.1f} FPS, size {frame_size}")
 
+        # Log memory optimization settings
+        if self.processing_scale < 1.0:
+            proc_h, proc_w = int(frame_size[1] * self.processing_scale), int(frame_size[0] * self.processing_scale)
+            self._log(f"  Processing scale: {self.processing_scale} ({proc_w}x{proc_h})")
+        self._log(f"  Vessel segmentation size: {self.vessel_seg_size}")
+
         # Step 2: Preprocess frames (green channel + CLAHE)
         self._log("Preprocessing frames...")
         preprocessed = self.preprocessor.preprocess_batch(frames)
@@ -160,6 +229,7 @@ class RetinaStabilizer:
         self._log(f"  Selected frame {ref_idx} as reference")
 
         # Step 4: Compute vessel probability maps / Frangi enhancement
+        # Use downsampled images for vessel segmentation to save memory
         self._log("Computing vessel maps...")
         vessel_weights = []
         frangi_frames = []
@@ -167,7 +237,11 @@ class RetinaStabilizer:
         iterator = tqdm(preprocessed, desc="Vessel maps") if self.verbose else preprocessed
         for frame in iterator:
             if self.use_vessel_segmentation and self.vessel_segmenter is not None:
-                weights = self.vessel_segmenter.get_confidence_weights(frame)
+                # Downsample for vessel segmentation
+                small_frame, original_size = self._downsample_for_vessel_seg(frame)
+                weights = self.vessel_segmenter.get_confidence_weights(small_frame)
+                # Upsample weights back to original size
+                weights = self._upsample_weights(weights, original_size)
             else:
                 weights = create_frangi_vessel_map(frame)
                 weights = 0.3 + 0.7 * weights
@@ -175,14 +249,39 @@ class RetinaStabilizer:
             vessel_weights.append(weights)
             frangi_frames.append(self.reference_selector.get_frangi_enhanced(frame))
 
-        # Step 5: Estimate motion trajectory
+        # Clear GPU memory after vessel segmentation
+        self._clear_gpu_memory()
+
+        # Step 5: Create downsampled frames for motion estimation
+        if self.processing_scale < 1.0:
+            self._log(f"Downsampling frames for motion estimation (scale={self.processing_scale})...")
+            preprocessed_small = [self._downsample_frame(f, self.processing_scale) for f in preprocessed]
+            vessel_weights_small = [self._downsample_frame(w, self.processing_scale) for w in vessel_weights]
+            frangi_small = [self._downsample_frame(f, self.processing_scale) for f in frangi_frames]
+        else:
+            preprocessed_small = preprocessed
+            vessel_weights_small = vessel_weights
+            frangi_small = frangi_frames
+
+        # Step 6: Estimate motion trajectory (at reduced resolution)
         self._log("Estimating motion...")
-        raw_transforms = self._estimate_motion_progressive(
-            preprocessed,
-            vessel_weights,
-            frangi_frames,
+        raw_transforms_small = self._estimate_motion_progressive(
+            preprocessed_small,
+            vessel_weights_small,
+            frangi_small,
             ref_idx
         )
+
+        # Scale transforms back to full resolution
+        if self.processing_scale < 1.0:
+            raw_transforms = [self._scale_transform(t, self.processing_scale) for t in raw_transforms_small]
+            # Free memory from downsampled frames
+            del preprocessed_small, vessel_weights_small, frangi_small
+        else:
+            raw_transforms = raw_transforms_small
+
+        # Clear GPU memory after motion estimation
+        self._clear_gpu_memory()
 
         # Step 6: Smooth trajectory
         self._log("Smoothing trajectory...")
@@ -373,22 +472,45 @@ class RetinaStabilizer:
         ref_idx = self.reference_selector.select_reference(preprocessed)
         self._log(f"Reference frame: {ref_idx}")
 
-        # Vessel maps
+        # Vessel maps (with downsampling optimization)
         vessel_weights = []
         frangi_frames = []
         for frame in preprocessed:
             if self.use_vessel_segmentation and self.vessel_segmenter is not None:
-                weights = self.vessel_segmenter.get_confidence_weights(frame)
+                small_frame, original_size = self._downsample_for_vessel_seg(frame)
+                weights = self.vessel_segmenter.get_confidence_weights(small_frame)
+                weights = self._upsample_weights(weights, original_size)
             else:
                 weights = create_frangi_vessel_map(frame)
                 weights = 0.3 + 0.7 * weights
             vessel_weights.append(weights)
             frangi_frames.append(self.reference_selector.get_frangi_enhanced(frame))
 
+        self._clear_gpu_memory()
+
+        # Downsample for motion estimation if needed
+        if self.processing_scale < 1.0:
+            preprocessed_small = [self._downsample_frame(f, self.processing_scale) for f in preprocessed]
+            vessel_weights_small = [self._downsample_frame(w, self.processing_scale) for w in vessel_weights]
+            frangi_small = [self._downsample_frame(f, self.processing_scale) for f in frangi_frames]
+        else:
+            preprocessed_small = preprocessed
+            vessel_weights_small = vessel_weights
+            frangi_small = frangi_frames
+
         # Motion estimation
-        raw_transforms = self._estimate_motion_progressive(
-            preprocessed, vessel_weights, frangi_frames, ref_idx
+        raw_transforms_small = self._estimate_motion_progressive(
+            preprocessed_small, vessel_weights_small, frangi_small, ref_idx
         )
+
+        # Scale transforms back to full resolution
+        if self.processing_scale < 1.0:
+            raw_transforms = [self._scale_transform(t, self.processing_scale) for t in raw_transforms_small]
+            del preprocessed_small, vessel_weights_small, frangi_small
+        else:
+            raw_transforms = raw_transforms_small
+
+        self._clear_gpu_memory()
 
         # Smoothing
         smoothed_transforms = self.trajectory_smoother.smooth(raw_transforms, fps)
@@ -430,6 +552,11 @@ def main():
                         help="Use Frangi filter instead of neural vessel segmentation")
     parser.add_argument("--vessel-model", default=None, help="Path to vessel segmentation model")
     parser.add_argument("--quiet", action="store_true", help="Disable verbose output")
+    # Memory optimization
+    parser.add_argument("--processing-scale", type=float, default=0.25,
+                        help="Scale for motion estimation (0.25 = 1/4 resolution, saves memory)")
+    parser.add_argument("--vessel-seg-size", type=int, nargs=2, default=[512, 512],
+                        help="Target size for vessel segmentation (width height)")
 
     args = parser.parse_args()
 
@@ -440,7 +567,9 @@ def main():
         inpaint_borders=not args.no_inpaint,
         use_vessel_segmentation=not args.no_vessel_seg,
         vessel_model_path=args.vessel_model,
-        verbose=not args.quiet
+        verbose=not args.quiet,
+        processing_scale=args.processing_scale,
+        vessel_seg_size=tuple(args.vessel_seg_size)
     )
 
     # Run stabilization
