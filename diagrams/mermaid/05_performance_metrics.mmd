@@ -1,0 +1,45 @@
+```mermaid
+flowchart LR
+    subgraph "Stability Metrics"
+        A1[Residual Motion] --> A2["Measures: Remaining<br/>frame-to-frame displacement"]
+        A1 --> A3["Target: 0.4-0.9 px"]
+
+        B1[Jitter Reduction] --> B2["Measures: High-frequency<br/>motion suppression"]
+        B1 --> B3["Target: 85-95%"]
+
+        C1[ITF<br/>Inter-frame Transform<br/>Fidelity] --> C2["Measures: Transform<br/>estimation accuracy"]
+        C1 --> C3["Target: > 0.95"]
+    end
+
+    subgraph "Quality Metrics"
+        D1[PSNR] --> D2["Measures: Pixel-level<br/>reconstruction accuracy"]
+        D1 --> D3["Target: 25-35 dB"]
+
+        E1[SSIM] --> E2["Measures: Structural<br/>similarity preservation"]
+        E1 --> E3["Target: 0.85-0.98"]
+
+        F1[Cropping Ratio] --> F2["Measures: Usable frame<br/>area after stabilization"]
+        F1 --> F3["Target: > 0.93"]
+    end
+
+    subgraph "Efficiency Metrics"
+        G1[Real-time Factor] --> G2["Measures: Processing speed<br/>vs playback speed"]
+        G1 --> G3["Target: > 2.8x"]
+
+        H1[FPS Throughput] --> H2["Measures: Frames processed<br/>per second"]
+        H1 --> H3["Target: 120-300 FPS"]
+
+        I1[Memory Usage] --> I2["Measures: GPU/CPU<br/>memory footprint"]
+        I1 --> I3["Target: < 4 GB"]
+    end
+
+    style A1 fill:#e3f2fd
+    style B1 fill:#e3f2fd
+    style C1 fill:#e3f2fd
+    style D1 fill:#f3e5f5
+    style E1 fill:#f3e5f5
+    style F1 fill:#f3e5f5
+    style G1 fill:#fff3e0
+    style H1 fill:#fff3e0
+    style I1 fill:#fff3e0
+```

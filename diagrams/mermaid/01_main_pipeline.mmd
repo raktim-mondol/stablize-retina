@@ -1,0 +1,48 @@
+```mermaid
+flowchart TD
+    subgraph Input
+        A[Input Video] --> B[Frame Extraction]
+    end
+
+    subgraph Preprocessing
+        B --> C[Green Channel Extraction]
+        C --> D[CLAHE Enhancement]
+        D --> E[Vessel Segmentation]
+    end
+
+    subgraph Reference Selection
+        E --> F[Compute Sharpness Score]
+        E --> G[Compute Vessel Visibility]
+        F --> H[Select Reference Frame]
+        G --> H
+    end
+
+    subgraph Motion Estimation
+        H --> I[RAFT Optical Flow]
+        I --> J{Confidence Check}
+        J -->|High| K[RANSAC Transform Fitting]
+        J -->|Low| L[ECC Fallback]
+        L --> K
+    end
+
+    subgraph Trajectory Processing
+        K --> M[Cumulative Path Computation]
+        M --> N[L1 Bundled Path Smoothing]
+        N --> O[Kalman Filtering]
+        O --> P[Tremor Removal]
+    end
+
+    subgraph Frame Warping
+        P --> Q[Apply Stabilization Transform]
+        Q --> R[Border Artifact Inpainting]
+    end
+
+    subgraph Output
+        R --> S[Stabilized Video]
+    end
+
+    style A fill:#e1f5fe
+    style S fill:#c8e6c9
+    style I fill:#fff3e0
+    style N fill:#fce4ec
+```

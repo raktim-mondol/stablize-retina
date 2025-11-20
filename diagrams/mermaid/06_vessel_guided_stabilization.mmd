@@ -1,0 +1,32 @@
+```mermaid
+flowchart TD
+    subgraph "Vessel-Guided Strategy"
+        A[Input Frame] --> B[Vessel Segmentation]
+        B --> C[Extract Vessel Centerlines]
+        C --> D[Vessel Keypoint Detection]
+    end
+
+    subgraph "Weighted Motion Estimation"
+        D --> E[Compute Vessel Weights]
+        F[RAFT Flow Field] --> G[Apply Vessel Mask]
+        E --> G
+        G --> H[Vessel-Weighted Flow]
+    end
+
+    subgraph "Benefits"
+        H --> I["Higher accuracy in<br/>vessel-rich regions"]
+        H --> J["Robust to background<br/>illumination changes"]
+        H --> K["Preserves diagnostic<br/>relevant structures"]
+    end
+
+    subgraph "Clinical Relevance"
+        I --> L[Accurate Vessel Tracking]
+        J --> L
+        K --> L
+        L --> M["Enables:<br/>• Blood flow analysis<br/>• Vessel diameter measurement<br/>• Pathology detection"]
+    end
+
+    style B fill:#c8e6c9
+    style H fill:#fff9c4
+    style M fill:#e1f5fe
+```
