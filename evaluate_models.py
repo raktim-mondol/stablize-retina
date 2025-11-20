@@ -20,6 +20,7 @@ import cv2
 from retina_stabilizer.pipeline import RetinaStabilizer
 from retina_stabilizer.preprocessing import Preprocessor
 from retina_stabilizer.evaluation import VideoEvaluator, EvaluationResult
+from retina_stabilizer.benchmark import PipelineBenchmarker, run_benchmark_comparison
 
 
 def find_videos(input_path: Path) -> List[Path]:
@@ -263,6 +264,11 @@ def main():
         help='Compare different stabilization methods'
     )
     parser.add_argument(
+        '--benchmark',
+        action='store_true',
+        help='Run computational benchmark (timing, memory, throughput)'
+    )
+    parser.add_argument(
         '--save_videos',
         action='store_true',
         help='Save stabilized videos to output directory'
@@ -304,7 +310,16 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Run evaluation
-    if args.compare_methods:
+    if args.benchmark:
+        # Run computational benchmark
+        print("Running computational benchmark...")
+        run_benchmark_comparison(
+            [str(p) for p in video_paths],
+            str(output_dir),
+            device=args.device,
+            warmup=1
+        )
+    elif args.compare_methods:
         compare_methods(video_paths, output_dir, args.device)
     else:
         # Single configuration evaluation
