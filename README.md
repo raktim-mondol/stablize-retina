@@ -10,6 +10,7 @@ State-of-the-art retinal video stabilization using vessel-guided RAFT optical fl
 - **L1 bundled smoothing**: Minimizes crop while removing jitter
 - **Kalman filtering**: Removes 8-12 Hz hand tremor
 - **Content-preserving warps**: Telea inpainting for clean borders
+- **Memory optimized**: Handles large images (1800x3200+) with reduced memory footprint
 
 ## Expected Performance
 
@@ -39,6 +40,9 @@ python run_stabilization.py input.mp4 output.mp4 --no-crop
 
 # Use Frangi filter instead of neural vessel segmentation
 python run_stabilization.py input.mp4 output.mp4 --no-vessel-seg
+
+# Memory optimization for large images (1800x3200)
+python run_stabilization.py input.mp4 output.mp4 --processing-scale 0.25 --vessel-seg-size 512 512
 ```
 
 ### Python API
@@ -63,6 +67,29 @@ stabilized_frames, metrics = stabilizer.stabilize(
 print(f"FOV retention: {metrics['fov_retention']*100:.1f}%")
 print(f"Residual motion: {metrics['residual_motion']:.2f} px")
 ```
+
+### Memory Optimization for Large Images
+
+For high-resolution videos (e.g., 1800x3200), use memory optimization to reduce RAM/VRAM usage:
+
+```python
+from retina_stabilizer import RetinaStabilizer
+
+# Optimized for large images (reduces memory from ~20GB to ~4GB)
+stabilizer = RetinaStabilizer(
+    device='cuda',
+    processing_scale=0.25,       # Motion estimation at 1/4 resolution
+    vessel_seg_size=(512, 512)   # Vessel segmentation at 512x512
+)
+
+stabilized_frames, metrics = stabilizer.stabilize('large_video.mp4', 'output.mp4')
+```
+
+| Image Size | processing_scale | Memory Usage |
+|------------|------------------|--------------|
+| 1800x3200  | 1.0 (default)    | ~20GB+       |
+| 1800x3200  | 0.5              | ~8GB         |
+| 1800x3200  | 0.25             | ~4GB         |
 
 ### Module Components
 
@@ -107,6 +134,8 @@ Key parameters in `RetinaStabilizer`:
 | `kalman_process_noise` | 0.03 | Kalman filter tuning |
 | `auto_crop` | True | Crop to stable region |
 | `inpaint_borders` | True | Inpaint border artifacts |
+| `processing_scale` | 1.0 | Scale for motion estimation (0.25 = 1/4 res) |
+| `vessel_seg_size` | (512, 512) | Target size for vessel segmentation |
 
 ## Requirements
 
