@@ -1,0 +1,30 @@
+```mermaid
+flowchart TD
+    subgraph "Traditional Methods"
+        A1[Feature Detection] --> A2[SIFT/ORB/SURF]
+        A2 --> A3[Sparse Matching]
+        A3 --> A4["Limitations:<br/>• Fails on low-texture<br/>• Sparse correspondences"]
+    end
+
+    subgraph "Deep Learning Methods"
+        B1[Optical Flow] --> B2[RAFT Network]
+        B2 --> B3[Dense Flow Field]
+        B3 --> B4["Advantages:<br/>• Dense correspondences<br/>• Handles low-texture<br/>• 30-40% lower error"]
+    end
+
+    subgraph "Smoothing Comparison"
+        C1[Gaussian Smoothing] --> C2["FOV: 70-80%<br/>Simple but aggressive"]
+        C3[Moving Average] --> C4["FOV: 75-85%<br/>Introduces lag"]
+        C5[L1 Optimization] --> C6["FOV: 93%+<br/>Preserves intentional motion"]
+    end
+
+    subgraph "Our Approach"
+        D1[Vessel-Guided RAFT] --> D2[L1 Bundled Smoothing]
+        D2 --> D3[Kalman + Butterworth]
+        D3 --> D4["Result:<br/>• Best FOV retention<br/>• Tremor-specific removal<br/>• Clinical-grade stability"]
+    end
+
+    style B4 fill:#c8e6c9
+    style C6 fill:#c8e6c9
+    style D4 fill:#e1f5fe
+```

@@ -1,0 +1,38 @@
+```mermaid
+flowchart TD
+    subgraph "Input Trajectories"
+        A[Frame Transforms] --> B[Cumulative Path<br/>tx, ty, θ, s per frame]
+    end
+
+    subgraph "L1 Bundled Path Smoothing"
+        B --> C[Formulate Optimization Problem]
+        C --> D["Minimize: Σ|P_smooth - P_original|<br/>+ λ·Σ|ΔP_smooth|"]
+        D --> E[Convex Optimization Solver]
+        E --> F[Smooth Path]
+    end
+
+    subgraph "Kalman Filtering"
+        F --> G[State Prediction]
+        G --> H[Measurement Update]
+        H --> I["Tuned for 8-12 Hz<br/>Hand Tremor"]
+    end
+
+    subgraph "Tremor Removal"
+        I --> J[FFT Analysis]
+        J --> K["Butterworth Bandstop<br/>(8-12 Hz)"]
+        K --> L[IFFT Reconstruction]
+    end
+
+    subgraph "Compensation Transform"
+        L --> M[Compute Correction]
+        M --> N["T_stabilize = T_smooth · T_original⁻¹"]
+    end
+
+    style D fill:#fce4ec
+    style I fill:#e8eaf6
+    style K fill:#fff8e1
+    style N fill:#e8f5e9
+
+    note1["L1 smoothing achieves<br/>93%+ FOV retention vs<br/>70-80% with Gaussian"]
+    style note1 fill:#f5f5f5,stroke:#9e9e9e
+```
