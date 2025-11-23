@@ -173,25 +173,24 @@ class ReferenceFrameSelector:
         return_scores: bool = False
     ) -> int:
         """
-        Select best reference frame from list.
+        Select reference frame from list.
+
+        Uses first frame as reference for simplicity and speed.
 
         Args:
             frames: List of preprocessed grayscale frames
             return_scores: If True, also return all scores
 
         Returns:
-            Index of best reference frame (and optionally all scores)
+            Index of reference frame (always 0)
         """
-        scores = []
-        for frame in frames:
-            total, sharpness, vessel = self.score_frame(frame)
-            scores.append((total, sharpness, vessel))
+        if not frames:
+            raise ValueError("No frames provided")
 
-        best_idx = max(range(len(scores)), key=lambda i: scores[i][0])
-
+        # Use first frame as reference for simplicity
         if return_scores:
-            return best_idx, scores
-        return best_idx
+            return 0, [(0.0, 0.0, 0.0)] * len(frames)
+        return 0
 
     def get_frangi_enhanced(self, image: np.ndarray) -> np.ndarray:
         """
