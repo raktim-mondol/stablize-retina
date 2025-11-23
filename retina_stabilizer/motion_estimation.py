@@ -115,8 +115,14 @@ class MotionEstimator:
             print("Will use Farneback optical flow as alternative.")
             self.raft_model = None
 
-    def _preprocess_for_raft(self, image: np.ndarray) -> torch.Tensor:
-        """Preprocess image for RAFT input."""
+    def _preprocess_for_raft(self, image: np.ndarray) -> Tuple[torch.Tensor, int, int]:
+        """Preprocess image for RAFT input.
+
+        Returns:
+            tensor: Preprocessed image tensor
+            new_h: Padded height (multiple of 8)
+            new_w: Padded width (multiple of 8)
+        """
         # Convert grayscale to RGB
         if len(image.shape) == 2:
             image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
@@ -133,7 +139,7 @@ class MotionEstimator:
         if new_h != h or new_w != w:
             tensor = F.interpolate(tensor, size=(new_h, new_w), mode='bilinear', align_corners=False)
 
-        return tensor
+        return tensor, new_h, new_w
 
     @torch.no_grad()
     def compute_raft_flow(
@@ -155,8 +161,8 @@ class MotionEstimator:
         if self.raft_model is None:
             return self._compute_farneback_flow(frame1, frame2)
 
-        img1 = self._preprocess_for_raft(frame1)
-        img2 = self._preprocess_for_raft(frame2)
+        img1, new_h, new_w = self._preprocess_for_raft(frame1)
+        img2, _, _ = self._preprocess_for_raft(frame2)
 
         # Run RAFT
         flow_predictions = self.raft_model(img1, img2)
@@ -166,9 +172,9 @@ class MotionEstimator:
         h, w = frame1.shape[:2]
         flow = F.interpolate(flow, size=(h, w), mode='bilinear', align_corners=False)
 
-        # Scale flow values
-        flow[:, 0] *= w / flow.shape[3]
-        flow[:, 1] *= h / flow.shape[2]
+        # Scale flow values to account for resolution change
+        flow[:, 0] *= w / new_w
+        flow[:, 1] *= h / new_h
 
         flow = flow.squeeze().permute(1, 2, 0).cpu().numpy()
 
